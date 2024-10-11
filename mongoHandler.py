@@ -1,21 +1,23 @@
-#Gerencia a conexão com o MongoDB e autentica os usuários
-
 from pymongo import MongoClient
 
 class MongoHandler:
     def __init__(self, connection_string=None):
         if connection_string is None:
-            # Substitua pelo seu string de conexão
-            self.connection_string = "mongodb://localhost:27017/"
+            self.connection_string = ""
         else:
             self.connection_string = connection_string
+        self.client = None
+        self.db = None
 
     def connect(self):
-        return MongoClient(self.connection_string)
+        self.client = MongoClient(self.connection_string)
+        self.db = self.client.get_database("sua_colecao")
+        print("Conectado ao banco de dados.")
 
-    def authenticate(self, email: str, senha: str) -> bool:
-        db = self.connect()['chat_db']
-        user = db['users'].find_one({"email": email})
-        if user and user['password'] == senha:
-            return True
-        return False
+    def autenticar(self, email, password):
+        colecao = self.db.get_collection("users")
+        usuario = colecao.find_one({"email": email, "password": password})
+        return usuario is not None
+
+    def get_collection(self, sua_colecao):
+        return self.db.get_collection(sua_colecao)

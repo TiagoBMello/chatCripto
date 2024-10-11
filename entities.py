@@ -1,64 +1,48 @@
-#Contém as classes relacionadas ao chat
-
-import os
+from Crypto.Cipher import AES
 import base64
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC # type: ignore
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes # type: ignore
-from cryptography.hazmat.backends import default_backend # type: ignore
-from cryptography.hazmat.primitives import hashes # type: ignore
+import hashlib
+import os
 
-class Message:
-    def __init__(self, sender: str, receiver: str, content: str):
-        self.sender = sender
-        self.receiver = receiver
-        self.content = content
 
-    def encrypt(self, password: str):
-        salt = os.urandom(16)
-        key = self.generate_key(password, salt)
+class EncryptionHandler:
+    def __init__(self, chave):
+        self.chave = hashlib.sha256(chave.encode()).digest()
+
+    def cipher(self, texto_plano):
         iv = os.urandom(16)
-        encryptor = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend()).encryptor()
-        encrypted_content = encryptor.update(self.content.encode()) + encryptor.finalize()
-        return base64.b64encode(iv + encrypted_content).decode('utf-8'), base64.b64encode(salt).decode('utf-8')
+        cipher = AES.new(self.chave, AES.MODE_CBC, iv)
 
-    @staticmethod
-    def decrypt(encrypted_content: str, password: str, salt: str):
-        encrypted_data = base64.b64decode(encrypted_content)
-        iv = encrypted_data[:16]
-        encrypted_message = encrypted_data[16:]
-        salt_bytes = base64.b64decode(salt)
-        key = Message.generate_key(password, salt_bytes)
-        decryptor = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend()).decryptor()
-        return decryptor.update(encrypted_message) + decryptor.finalize()
+        dados_preenchidos = self._pad(texto_plano)
+        dados_criptografados = cipher.encrypt(dados_preenchidos.encode())
 
-    @staticmethod
-    def generate_key(password: str, salt: bytes):
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=salt,
-            iterations=100000,
-            backend=default_backend()
-        )
-        return kdf.derive(password.encode())
+        return base64.b64encode(iv + dados_criptografados).decode('utf-8')
 
+    def decrypt(self, mensagem_criptografada):
+        dados_decodificados = base64.b64decode(mensagem_criptografada)
 
+        iv = dados_decodificados[:16]
+        dados_criptografados = dados_decodificados[16:]
+
+        cipher = AES.new(self.chave, AES.MODE_CBC, iv)
+        dados_decriptados = cipher.decrypt(dados_criptografados)
+
+        return self._unpad(dados_decriptados.decode('utf-8'))
+
+    def _pad(self, s):
+        tamanho_bloco = AES.block_size
+        padding = tamanho_bloco - len(s) % tamanho_bloco
+        return s + (chr(padding) * padding)
+
+    def _unpad(self, s):
+        return s[:-ord(s[len(s) - 1:])]
 class Chat:
-    def __init__(self, db):
-        self.db = db
+    def __init__(self, db_handler):
+        self.db_handler = db_handler
 
-    def send_message(self, sender: str, receiver: str, content: str, password: str):
-        message = Message(sender, receiver, content)
-        encrypted_content, salt = message.encrypt(password)
-        self.db['messages'].insert_one({
-            'from': sender,
-            'to': receiver,
-            'message': encrypted_content,
-            'salt': salt
-        })
+    def enviar_mensagem(self, sender, recipient, message):
+        colecao = self.db_handler.get_collection("messages")
+        colecao.insert_one({"from": sender, "to": recipient, "message": message})
 
-    def fetch_messages(self, receiver: str, password: str):
-        messages = self.db['messages'].find({'to': receiver})
-        for msg in messages:
-            decrypted_message = Message.decrypt(msg['message'], password, msg['salt'])
-            print(f"De: {msg['from']} | Para: {msg['to']} | Mensagem: {decrypted_message.decode('utf-8')}")
+    def buscar_mensagens(self, recipient):
+        colecao = self.db_handler.get_collection("messages")
+        return colecao.find({"to": recipient})
